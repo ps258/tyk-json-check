@@ -7,6 +7,9 @@ from io import UnsupportedOperation
 import json
 import argparse, sys
 
+DEBUG=False
+
+# a list of functins that can be used to compare trigger values in GatewayConfigChecks with in with actual values in the config file
 def isTrue(compare, acutal):
     return acutal
 
@@ -31,48 +34,80 @@ def isGE(compare, actual):
 def isLE(compare, actual):
     return actual <= compare
 
+def isThere(compare, actual):
+    return actual
 
+# define all the checks to perform here
 GatewayConfigChecks = {
-    'health_check.enable_health_checks': 
-        {
-            'checkFn': isTrue,
-            'compare': True,
-            'message': 'Performance will suffer'
-        },
-    'health_check.health_check_value_timeouts':
-        {
-            'checkFn': isGT,
-            'compare': 0,
-            'message': 'This will panic many versions of the gateway if the healthcheck endpoit is called'
-        }
+    'health_check.enable_health_checks': {
+        'checkFn': isTrue,
+        'compare': True,
+        'message': 'is set. Performance will suffer'
+    },
+    'health_check.health_check_value_timeouts': {
+        'checkFn': isGT,
+        'compare': 0,
+        'getvalue': True,
+        'message': 'is greater than 0. This will panic many versions of the gateway if the API healthcheck endpoit is called'
+    },
+    'hash_key_function': {
+        'checkFn': isThere,
+        'compare': '',
+        'message': 'is defined. Check for hash_key_function_fallback and the possibility of lost encrypted certs and keys'
+    },
+    'health_check_endpoint_name':{
+        'checkFn': isNE,
+        'compare': '/hello',
+        'getValue': True,
+        'message': 'is defined. Check that /hello as not been renamed'
+    },
+    'analytics_config.enable_detailed_recording': {
+        'checkFn': isTrue,
+        'compare': True,
+        'message': 'is set. Performace will suffer'
+    },
+    'uptime_tests.disable': {
+        'checkFn': isFalse,
+        'compare': False,
+        'message': 'is set. Look for uptime checks in APIs'
+    },
+    'uptime_tests.config.time_wait': {
+        'checkFn': isGT,
+        'compare': 25,
+        'getValue': True,
+        'message': 'is greater than 25. Uptime tests may never trigger'
+    }
 }
 
 def checkVal(config, checkObj, checkPath):
     if '.' not in checkPath:
         if checkPath in config:
             # check that value against compare.
+            if 'getValue' in checkObj and checkObj['getValue']:
+                    checkObj['Value'] = config[checkPath]
             if checkObj['checkFn'](checkObj['compare'], config[checkPath]):
-                print("[WARN]Gateway:", checkObj['message'])
+                return checkObj['message']
         else:
-            print("[DEBUG]Gateway:", checkPath, 'is unset')
+            if DEBUG:
+                return 'is unset'
     else:
         splitPath=checkPath.split('.')
         firstPath=splitPath[0]
         restofPath='.'.join(splitPath[1:])
-        checkVal(config[firstPath], checkObj, restofPath)
+        return checkVal(config[firstPath], checkObj, restofPath)
 
 
 def gatewayChecks(g):
     # various checks on the gateway config
     for check in GatewayConfigChecks:
-        checkVal(g, GatewayConfigChecks[check], check)
-    if 'health_check' in g:
-        if 'enable_health_checks' in g['health_check']:
-            if g['health_check']['enable_health_checks']:
-                print("[WARN]Gateway: health_check.enable_health_checks is set. Performance will suffer")
-        if 'health_check_value_timeouts' in g['health_check']:
-            if g['health_check']['health_check_value_timeouts'] > 0:
-                print("[WARN]Gateway: health_check.health_check_value_timeouts is non-zero. This will panic many versions of the gateway if the endpoit is called")
+        result = checkVal(g, GatewayConfigChecks[check], check)
+        if result:
+            if 'getValue' in GatewayConfigChecks[check] and GatewayConfigChecks[check]['getValue']:
+                print('[WARN]Gateway:',"'"+check+"'", '('+str(GatewayConfigChecks[check]['Value'])+')', result)
+            else:
+                print('[WARN]Gateway:',"'"+check+"'", result)
+    return
+
 
 def main():
     parser = argparse.ArgumentParser(description='Check tyk config files for errors and gotchas')
