@@ -37,22 +37,34 @@ def isLE(compare, actual):
 def isThere(compare, actual):
     return actual
 
+# A sample test
+#    'health_check.health_check_value_timeouts': {          # this is the config path to check
+#        'checkFn': isGT,                                   # the function that will return true to trigger the message being printed
+#        'compare': 0,                                      # the vaule to compare. Here we compare 'config value is greater than 0'
+#        'getValue': True,                                  # the makes the diagnostic output include the value from the config file
+#                                                           # this next one is the message
+#        'message': 'is greater than 0. This will panic many versions of the gateway if the API healthcheck endpoint is called'
+#    },
+# in this case we get the following printed when the value in the gateway config is > 0
+# [WARN]Gateway: 'health_check.health_check_value_timeouts' (60) is greater than 0. This will panic many versions of the gateway if the API healthcheck endpoint is called
+
 # define all the checks to perform here
 GatewayConfigChecks = {
     'health_check.enable_health_checks': {
         'checkFn': isTrue,
         'compare': True,
-        'message': 'is set. Performance will suffer'
+        'message': 'is set. Performance will suffer, redis will have added load.'
     },
     'health_check.health_check_value_timeouts': {
         'checkFn': isGT,
         'compare': 0,
-        'getvalue': True,
-        'message': 'is greater than 0. This will panic many versions of the gateway if the API healthcheck endpoit is called'
+        'getValue': True,
+        'message': 'is greater than 0. This will panic many versions of the gateway if the API healthcheck endpoint is called'
     },
     'hash_key_function': {
         'checkFn': isThere,
         'compare': '',
+        'getValue': True,
         'message': 'is defined. Check for hash_key_function_fallback and the possibility of lost encrypted certs and keys'
     },
     'health_check_endpoint_name':{
@@ -64,31 +76,39 @@ GatewayConfigChecks = {
     'analytics_config.enable_detailed_recording': {
         'checkFn': isTrue,
         'compare': True,
-        'message': 'is set. Performace will suffer'
+        'message': 'is set. Performace will suffer, redis will have added load.'
     },
     'uptime_tests.disable': {
         'checkFn': isFalse,
         'compare': False,
-        'message': 'is set. Look for uptime checks in APIs'
+        'message': 'is False. Look for uptime checks in APIs'
     },
     'uptime_tests.config.time_wait': {
         'checkFn': isGT,
         'compare': 25,
         'getValue': True,
-        'message': 'is greater than 25. Uptime tests may never trigger'
+        'message': 'is greater than ~25. Uptime tests may never trigger'
     }
 }
 
+# check if the 'compare' matches the value in the config (by calling the checkFn) and return the 'message' if it matches
 def checkVal(config, checkObj, checkPath):
     if '.' not in checkPath:
         if checkPath in config:
             # check that value against compare.
             if 'getValue' in checkObj and checkObj['getValue']:
-                    checkObj['Value'] = config[checkPath]
+                checkObj['Value'] = config[checkPath]
             if checkObj['checkFn'](checkObj['compare'], config[checkPath]):
                 return checkObj['message']
         else:
-            if DEBUG:
+            # harder to handle missing values. Just deal with the fact that missing booleans are 'False'
+            if isinstance(checkObj['compare'], bool):
+                if 'getValue' in checkObj and checkObj['getValue']:
+                    checkObj['Value'] = False
+                # Missing implies False so use that
+                if checkObj['checkFn'](checkObj['compare'], False):
+                    return checkObj['message']
+            elif DEBUG:
                 return 'is unset'
     else:
         splitPath=checkPath.split('.')
@@ -99,13 +119,14 @@ def checkVal(config, checkObj, checkPath):
 
 def gatewayChecks(g):
     # various checks on the gateway config
-    for check in GatewayConfigChecks:
-        result = checkVal(g, GatewayConfigChecks[check], check)
+    for checkName in GatewayConfigChecks:
+        check = GatewayConfigChecks[checkName]
+        result = checkVal(g, check, checkName)
         if result:
-            if 'getValue' in GatewayConfigChecks[check] and GatewayConfigChecks[check]['getValue']:
-                print('[WARN]Gateway:',"'"+check+"'", '('+str(GatewayConfigChecks[check]['Value'])+')', result)
+            if 'getValue' in check and check['getValue']:
+                print('[WARN]Gateway:',"'"+checkName+"'", '('+str(check['Value'])+')', result)
             else:
-                print('[WARN]Gateway:',"'"+check+"'", result)
+                print('[WARN]Gateway:',"'"+checkName+"'", result)
     return
 
 
