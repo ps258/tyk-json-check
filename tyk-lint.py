@@ -94,11 +94,12 @@ GatewayConfigChecks = {
 # check if the 'compare' matches the value in the config (by calling the checkFn) and return the 'message' if it matches
 def checkVal(config, checkObj, checkPath):
     if '.' not in checkPath:
+        checkFn = checkObj['checkFn']
         if checkPath in config:
             # check that value against compare.
             if 'getValue' in checkObj and checkObj['getValue']:
                 checkObj['Value'] = config[checkPath]
-            if checkObj['checkFn'](checkObj['compare'], config[checkPath]):
+            if checkFn(checkObj['compare'], config[checkPath]):
                 return checkObj['message']
         else:
             # harder to handle missing values. Just deal with the fact that missing booleans are 'False'
@@ -106,7 +107,7 @@ def checkVal(config, checkObj, checkPath):
                 if 'getValue' in checkObj and checkObj['getValue']:
                     checkObj['Value'] = False
                 # Missing implies False so use that
-                if checkObj['checkFn'](checkObj['compare'], False):
+                if checkFn(checkObj['compare'], False):
                     return checkObj['message']
             elif DEBUG:
                 return 'is unset'
