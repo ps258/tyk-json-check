@@ -3,29 +3,33 @@
 # Script to warn about config errors and gotchas in tyk's configuration files
 # Will need to eventually allow more than one gateway config file and be able to check if they are consistent
 
+from io import UnsupportedOperation
 import json
 import argparse, sys
 
-def isTrue(acutal):
+def isTrue(compare, acutal):
     return acutal
 
-def isFalse(actual):
+def isFalse(compare, actual):
     return not actual
 
-def isEqual(desired, actual):
-    return desired == actual
+def isEqual(compare, actual):
+    return compare == actual
 
-def isGT(desired, actual):
-    return actual > desired
+def isNE(compare, actual):
+    return compare != actual
 
-def isLT(desired, actual):
-    return actual < desired
+def isGT(compare, actual):
+    return actual > compare
 
-def isGE(desired, actual):
-    return actual >= desired
+def isLT(compare, actual):
+    return actual < compare
 
-def isLE(desired, actual):
-    return actual <= desired
+def isGE(compare, actual):
+    return actual >= compare
+
+def isLE(compare, actual):
+    return actual <= compare
 
 
 GatewayConfigChecks = {
@@ -40,14 +44,28 @@ GatewayConfigChecks = {
             'checkFn': isGT,
             'compare': 0,
             'message': 'This will panic many versions of the gateway if the healthcheck endpoit is called'
-
         }
-    
 }
+
+def checkVal(config, checkObj, checkPath):
+    if '.' not in checkPath:
+        if checkPath in config:
+            # check that value against compare.
+            if checkObj['checkFn'](checkObj['compare'], config[checkPath]):
+                print("[WARN]Gateway:", checkObj['message'])
+        else:
+            print("[DEBUG]Gateway:", checkPath, 'is unset')
+    else:
+        splitPath=checkPath.split('.')
+        firstPath=splitPath[0]
+        restofPath='.'.join(splitPath[1:])
+        checkVal(config[firstPath], checkObj, restofPath)
 
 
 def gatewayChecks(g):
     # various checks on the gateway config
+    for check in GatewayConfigChecks:
+        checkVal(g, GatewayConfigChecks[check], check)
     if 'health_check' in g:
         if 'enable_health_checks' in g['health_check']:
             if g['health_check']['enable_health_checks']:
