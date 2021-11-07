@@ -40,22 +40,19 @@ def isLE(compare, actual):
 def isThere(compare, actual):
     return actual
 
-def checkGWPolicies(GWconfig, checkObj):
+def checkGWConnectionString(GWconfig, checkObj):
     if getVal(GWconfig, 'policies.policy_source') == 'service':
         # policy string needs to be the same as 'db_app_conf_options.connection_string'
         # and not empty
         connection_string = getVal(GWconfig, 'db_app_conf_options.connection_string')
         policy_connection_string = getVal(GWconfig, 'policies.policy_connection_string')
-        #print("[DEBUG]" + policy_connection_string)
         if policy_connection_string == "":
-            checkObj['message'] = "policy_connection_string is empty. Gateway won't start"
+            checkObj['message'] = "is empty. Gateway won't start, or at least won't get dashboard policies."
             checkObj['logLevel'] = ["Fatal"]
-            checkObj['Value'] = "fred1"
             return checkObj['message']
         if connection_string != policy_connection_string:
-            checkObj['message'] = policy_connection_string + "doesn't match db_app_conf_options.connection_string"
+            checkObj['message'] = policy_connection_string + "doesn't match db_app_conf_options.connection_string."
             checkObj['logLevel'] = ["Fatal"]
-            checkObj['Value'] = "fred2"
             return checkObj['message']
 
 # A sample test
@@ -67,8 +64,7 @@ def checkGWPolicies(GWconfig, checkObj):
 #        'message': 'is greater than 0. This will panic many versions of the gateway if the API healthcheck endpoint is called'
 #        'logLevel: ["Warn"]                                # list of log levels to print at. Defaults to Warn
 #    },
-# in this case we get the following printed when the value in the gateway config is > 0
-# [Warn]Gateway: 'health_check.health_check_value_timeouts' (60) is greater than 0. This will panic many versions of the gateway if the API healthcheck endpoint is called
+
 
 # Define all the simple checks to perform on the gateway config file
 GatewayConfigChecks = {
@@ -85,7 +81,7 @@ GatewayConfigChecks = {
         'checkFn': isGT,
         'compare': 0,
         'reportValue': True,
-        'message': 'is greater than 0. This will panic many versions of the gateway if the API healthcheck endpoint is called',
+        'message': 'is greater than 0. This will panic many versions of the gateway if the API healthcheck endpoint is called.',
         'logLevel': ["Warn"]
     },
     # When 'hash_key_function' is changed during the life of an install keys will be inaccessible unless hash_key_function_fallback is set
@@ -93,7 +89,7 @@ GatewayConfigChecks = {
         'checkFn': isThere,
         'compare': '',
         'reportValue': True,
-        'message': 'is defined. Check for hash_key_function_fallback and the possibility of lost keys if it has been changed',
+        'message': 'is defined. Check for hash_key_function_fallback and the possibility of lost keys if it has been changed.',
         'logLevel': ["Info"]
     },
     # 'health_check_endpoint_name' renames /hello
@@ -101,7 +97,7 @@ GatewayConfigChecks = {
         'checkFn': isNE,
         'compare': '/hello',
         'reportValue': True,
-        'message': 'is defined. /hello has been renamed',
+        'message': 'is defined. /hello has been renamed.',
         'logLevel': ["Info"]
     },
     # 'analytics_config.enable_detailed_recording' will load redis if set to True
@@ -115,7 +111,7 @@ GatewayConfigChecks = {
     'uptime_tests.disable': {
         'checkFn': isFalse,
         'compare': False,
-        'message': 'is False. Look for uptime checks in APIs',
+        'message': 'is False. Look for uptime checks in APIs.',
         'logLevel': ["Info"]
     },
     # if 'uptime_tests.config.time_wait' is more than about 25 seconds, uptime tests will never trigger an outage. 2.9.6~rcxxx is the only fixed version
@@ -124,11 +120,11 @@ GatewayConfigChecks = {
         'checkFn': isGT,
         'compare': 25,
         'reportValue': True,
-        'message': 'is greater than ~25 seconds. Uptime tests may never trigger',
+        'message': 'is greater than ~25 seconds. Uptime tests may never trigger.',
         'logLevel': ["Warn"]
     },
-    'policies': {
-        'checkFn': checkGWPolicies
+    'policy.policy_connection_string': {
+        'checkFn': checkGWConnectionString
     }
 }
 
@@ -154,16 +150,15 @@ DashboardConfigChecks = {
     }
 }
 
-# get a value from the given config 
+# get a value from the given config, returns 'None' if not found in the config
 def getVal(config, checkPath):
     if '.' not in checkPath:
         if checkPath in config:
             if DEBUG:
-                print("[DEBUG]getVal returning '"+str(config[checkPath])+"' for " + checkPath)
+                print(f"[DEBUG][getVal({checkPath!r})]returning {config[checkPath]!r}")
             return config[checkPath]
-        else:
-            return None
     else:
+        # need to break off the first part of the key, up to the first '.' and recurse with the rest
         splitPath=checkPath.split('.')
         firstPath=splitPath[0]
         restofPath='.'.join(splitPath[1:])
@@ -197,7 +192,8 @@ def checkVal(config, checkObj, checkPath):
 
 # are we configured to print the log level of this check?
 def shouldPrint(logLevelList):
-    # print("Checking if " + " ".join(logLevelList) + " is in " + " ".join(LOGLEVEL))
+    if DEBUG:
+        print(f"[DEBUG][shouldPrint]Checking if {logLevelList!r} is in {LOGLEVEL!r}")
     for level in logLevelList:
         if level in LOGLEVEL:
             return True
@@ -216,35 +212,38 @@ def printResult(check, componentName, checkName, result):
         logLevelList = ['Info']
     if shouldPrint(logLevelList):
         if 'reportValue' in check and check['reportValue']:
-            print('[' + getLogLeveMatch(logLevelList) + ']' + componentName + ':',"'"+checkName+"'", '('+str(check['Value'])+')', result)
+            print(f"[{getLogLeveMatch(logLevelList)}]{componentName!r}: {checkName!r} ({check['Value']!r}) {result}")
         else:
-            print('[' + getLogLeveMatch(logLevelList) + ']' + componentName + ':',"'"+checkName+"'", result)
+            print(f"[{getLogLeveMatch(logLevelList)}]{componentName!r}: {checkName!r} {result}")
 
 # check the json of the config file against the given checks
 def SingleConfigFileChecks(componentName, jsonConfig, ConfigChecks):
     for checkName in ConfigChecks:
         if DEBUG:
-            print("[DEBUG]Checking '" + checkName + "'")
+            print(f"[DEBUG][SingleConfigFileChecks]checking {componentName!r} for {checkName!r}")
         check = ConfigChecks[checkName]
         result = checkVal(jsonConfig, check, checkName)
+        if DEBUG:
+            print(f"[DEBUG][SingleConfigFileChecks]result from checkVal({checkName!r}) is {result!r}")
         if result is not None and result:
-            if DEBUG:
-                print("[DEBUG]Result is '" + result + "'")
             printResult(check, componentName, checkName, result)
     return
 
 def main():
+    global LOGLEVEL
+    global DEBUG
     parser = argparse.ArgumentParser(description='Check tyk config files for errors and gotchas')
     parser.add_argument('-g', '--gatewayConfig', type=str, help='Gateway config file "tyk.conf"')
     parser.add_argument('-d', '--dashboardConfig', type=str, help='Dashboard config file "tyk_analytics.conf"')
     parser.add_argument('-t', '--TIBConfig', type=str, help='TIB config file "tib.conf"')
     parser.add_argument('-p', '--pumpConfig', type=str, help='Pump config file "pump.conf"')
     parser.add_argument('-l', '--logLevel', type=str, help='Level of checks to report. One of: "Fatal", "Warn", "Info", "Perf". Default is "warn"')
-    parser.add_argument('-v', dest='verbose', action='store_true')
-    args = parser.parse_args()
+    parser.add_argument('-D', '--DEBUG', dest='DEBUG', action='store_true', help="Enable debug output")
 
-    # setup the log level
-    global LOGLEVEL
+    args = parser.parse_args()
+    if args.DEBUG:
+        DEBUG=True
+
     if args.logLevel:
         if args.logLevel in [ 'f', 'fatal', 'Fatal']:
             LOGLEVEL = ["Fatal"]
