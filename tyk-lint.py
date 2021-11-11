@@ -60,7 +60,8 @@ def getkey(config, path, *default):
             return default[0]
         raise
 
-# 
+# To use '“disable_dashboard_zeroconf”: false' you need to make sure that policy.policy_connection_string and db_app_conf_options.connection_string are not defined.
+# If policy.policy_connection_string and db_app_conf_options.connection_string are defined, they need to be right no matter what disable_dashboard_zeroconf is set to
 def checkGWConnectionString(GWconfig):
     app_connection_string = getkey(GWconfig, 'db_app_conf_options.connection_string', "")
     policy_connection_string = getkey(GWconfig, 'policies.policy_connection_string', "")
