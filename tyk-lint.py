@@ -7,6 +7,7 @@ from io import UnsupportedOperation
 import json
 import argparse, sys
 from typing import get_args
+import functools
 
 DEBUG=False
 LOGLEVEL = ["Warn"]
@@ -40,20 +41,73 @@ def isLE(compare, actual):
 def isThere(compare, actual):
     return actual
 
-def checkGWConnectionString(GWconfig, checkObj):
-    if getVal(GWconfig, 'policies.policy_source') == 'service':
-        # policy string needs to be the same as 'db_app_conf_options.connection_string'
-        # and not empty
-        connection_string = getVal(GWconfig, 'db_app_conf_options.connection_string')
-        policy_connection_string = getVal(GWconfig, 'policies.policy_connection_string')
-        if policy_connection_string == "":
-            checkObj['message'] = "is empty. Gateway won't start, or at least won't get dashboard policies."
-            checkObj['logLevel'] = ["Fatal"]
-            return checkObj['message']
-        if connection_string != policy_connection_string:
-            checkObj['message'] = policy_connection_string + "doesn't match db_app_conf_options.connection_string."
-            checkObj['logLevel'] = ["Fatal"]
-            return checkObj['message']
+
+# from https://stackoverflow.com/questions/43491287/elegant-way-to-check-if-a-nested-key-exists-in-a-dict
+def haskey(config, path):
+    try:
+        functools.reduce(lambda x, y: x[y], path.split("."), config)
+        return True
+    except KeyError:
+        return False
+
+# from https://stackoverflow.com/questions/43491287/elegant-way-to-check-if-a-nested-key-exists-in-a-dict
+# Throwing in this approach for nested get for the heck of it...
+def getkey(config, path, *default):
+    try:
+        return functools.reduce(lambda x, y: x[y], path.split("."), config)
+    except KeyError:
+        if default:
+            return default[0]
+        raise
+
+# 
+def checkGWConnectionString(GWconfig):
+    app_connection_string = getkey(GWconfig, 'db_app_conf_options.connection_string', "")
+    policy_connection_string = getkey(GWconfig, 'policies.policy_connection_string', "")
+    if DEBUG:
+        print(f"app_connection_string = {app_connection_string!r}, policy_connection_string = {policy_connection_string!r}")
+    if getkey(GWconfig, 'use_db_app_configs', False):
+        # dashboard has APIs for us
+        if getkey(GWconfig, 'disable_dashboard_zeroconf', False):
+            # zero conf is disabled
+            if app_connection_string == "":
+                # dashboard connection string is missing
+                logFatal("'Gateway': db_app_conf_options.connection_string is empty or missing and zeroconf is turned off. Gateway won't start.")
+        else:
+            # zeroconf is enabled
+            if app_connection_string == "":
+                logFatal("'Gateway': db_app_conf_options.connection_string is empty and zeroconf is enabled. Gateway won't start.")
+            else:
+                logInfo("'Gateway': db_app_conf_options.connection_string is populated and zeroconf is enabled. Not much use having zeroconf on")
+    else:
+        # we're not looking to the dashboard for APIs
+        logInfo("'Gateway': use_db_app_configs is false. Gateway is running in CE or RPC mode")
+
+    if getkey(GWconfig, 'policies.policy_source', "") == 'service':
+        if getkey(GWconfig, 'disable_dashboard_zeroconf', False):
+            # disable_dashboard_zeroconf is true so policies.policy_connection_string must be set
+            if policy_connection_string == "":
+                logFatal("'Gateway': db_app_conf_options.connection_string is empty or missing and zeroconf is turned off. Gateway won't start.")
+        else:
+            # using disable_dashboard_zeroconf=false.  policies.policy_connection_string must be set or totally missing
+            if haskey(GWconfig, "policies.policy_connection_string"):
+                if policy_connection_string == "":
+                    logFatal("'Gateway': policies.policy_connection_string is empty and zeroconf is enabled. Gateway won't start.")
+
+    if policy_connection_string != "" and app_connection_string != "" and app_connection_string != policy_connection_string:
+        logFatal("'Gateway': db_app_conf_options.connection_string and policies.policy_connection_string are different. They must be the same")
+
+def logFatal(message):
+    if shouldPrint(["Fatal"]):
+        print(f"[Fatal]{message}")
+
+def logWarn(message):
+    if shouldPrint(["Warn"]):
+        print(f"[Warn]{message}")
+
+def logInfo(message):
+    if shouldPrint(["Info"]):
+        print(f"[Info]{message}")
 
 # A sample test
 #    'health_check.health_check_value_timeouts': {          # this is the config path to check
@@ -101,6 +155,7 @@ GatewayConfigChecks = {
         'logLevel': ["Info"]
     },
     # 'analytics_config.enable_detailed_recording' will load redis if set to True
+    # Todo: enable_analytics must be true too
     'analytics_config.enable_detailed_recording': {
         'checkFn': isTrue,
         'compare': True,
@@ -123,9 +178,6 @@ GatewayConfigChecks = {
         'message': 'is greater than ~25 seconds. Uptime tests may never trigger.',
         'logLevel': ["Warn"]
     },
-    'policy.policy_connection_string': {
-        'checkFn': checkGWConnectionString
-    }
 }
 
 # Define all the simple checks to perform on the pump config file
@@ -150,6 +202,20 @@ DashboardConfigChecks = {
     }
 }
 
+# return true if the key exists in the config
+def keyExists(config, checkPath):
+    if '.' not in checkPath:
+        return checkPath in config
+    else:
+        # need to break off the first part of the key, up to the first '.' and recurse with the rest
+        splitPath=checkPath.split('.')
+        firstPath=splitPath[0]
+        restofPath='.'.join(splitPath[1:])
+        if firstPath in config:
+            return keyExists(config[firstPath], restofPath)
+        else:
+            return False
+
 # get a value from the given config, returns 'None' if not found in the config
 def getVal(config, checkPath):
     if '.' not in checkPath:
@@ -163,7 +229,7 @@ def getVal(config, checkPath):
         firstPath=splitPath[0]
         restofPath='.'.join(splitPath[1:])
         if firstPath in config:
-            return getVal(config[firstPath], restofPath)        
+            return getVal(config[firstPath], restofPath)
 
 # check if the 'compare' matches the value in the config (by calling the checkFn) and return the 'message' if it matches
 # Populates checkObj['Value'] if 'reportValue' is true
@@ -229,6 +295,10 @@ def SingleConfigFileChecks(componentName, jsonConfig, ConfigChecks):
             printResult(check, componentName, checkName, result)
     return
 
+def ComplexGatewayChecks(GWConfig):
+    checkGWConnectionString(GWConfig)
+
+
 def main():
     global LOGLEVEL
     global DEBUG
@@ -265,6 +335,7 @@ def main():
         with open(args.gatewayConfig) as gatewayJsonFile:
             G=json.load(gatewayJsonFile)
             SingleConfigFileChecks('Gateway', G, GatewayConfigChecks)
+            ComplexGatewayChecks(G)
             gatewayConfigPresent = True
     if args.pumpConfig:
         with open(args.pumpConfig) as pumpJsonFile:
