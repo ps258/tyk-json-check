@@ -67,6 +67,7 @@ def checkGWConnectionString(GWconfig):
     policy_connection_string = getkey(GWconfig, 'policies.policy_connection_string', "")
     if DEBUG:
         print(f"app_connection_string = {app_connection_string!r}, policy_connection_string = {policy_connection_string!r}")
+    # deal with API definitions (db_app config items)
     if getkey(GWconfig, 'use_db_app_configs', False):
         # dashboard has APIs for us
         if getkey(GWconfig, 'disable_dashboard_zeroconf', False):
@@ -83,18 +84,18 @@ def checkGWConnectionString(GWconfig):
     else:
         # we're not looking to the dashboard for APIs
         logInfo("'Gateway': use_db_app_configs is false. Gateway is running in CE or RPC mode")
-
+    # deal with policy settings
     if getkey(GWconfig, 'policies.policy_source', "") == 'service':
         if getkey(GWconfig, 'disable_dashboard_zeroconf', False):
             # disable_dashboard_zeroconf is true so policies.policy_connection_string must be set
             if policy_connection_string == "":
                 logFatal("'Gateway': db_app_conf_options.connection_string is empty or missing and zeroconf is turned off. Gateway won't start.")
         else:
-            # using disable_dashboard_zeroconf=false.  policies.policy_connection_string must be set or totally missing
+            # using disable_dashboard_zeroconf=false. policies.policy_connection_string must be set or totally missing
             if haskey(GWconfig, "policies.policy_connection_string"):
                 if policy_connection_string == "":
                     logFatal("'Gateway': policies.policy_connection_string is empty and zeroconf is enabled. Gateway won't start.")
-
+    # if policy_connection_string and db_app_conf_options.connection_string are not empty, check that they are the same
     if policy_connection_string != "" and app_connection_string != "" and app_connection_string != policy_connection_string:
         logFatal("'Gateway': db_app_conf_options.connection_string and policies.policy_connection_string are different. They must be the same")
 
