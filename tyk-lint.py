@@ -12,35 +12,42 @@ import functools
 DEBUG=False
 LOGLEVEL = ["Warn"]
 
-# a list of functions that can be used to compare trigger values in *ConfigChecks with in with actual values in the config file
-# these have to be defined before they can be referenced in the dictionaries below
-def isTrue(compare, acutal):
-    return acutal
+#####################################################################################################
+######################################### Log Functions #############################################
+#####################################################################################################
 
-def isFalse(compare, actual):
-    return not actual
+def logFatal(ConfigJson, message):
+    configFileName = ConfigJson['__CONFIG-FILE']
+    if shouldPrint(["Fatal"]):
+        print(f"[Fatal]{configFileName}: {message}")
 
-def isEqual(compare, actual):
-    return compare == actual
+def logWarn(ConfigJson, message):
+    configFileName = ConfigJson['__CONFIG-FILE']
+    if shouldPrint(["Warn"]):
+        print(f"[Warn]{configFileName}: {message}")
 
-def isNE(compare, actual):
-    return compare != actual
+def logInfo(ConfigJson, message):
+    configFileName = ConfigJson['__CONFIG-FILE']
+    if shouldPrint(["Info"]):
+        print(f"[Info]{configFileName}: {message}")
 
-def isGT(compare, actual):
-    return actual > compare
+# are we configured to print the log level of this check?
+def shouldPrint(logLevelList):
+    if DEBUG:
+        print(f"[DEBUG][shouldPrint]Checking if {logLevelList!r} is in {LOGLEVEL!r}")
+    for level in logLevelList:
+        if level in LOGLEVEL:
+            return True
 
-def isLT(compare, actual):
-    return actual < compare
+# a check can have multiple log levels. Report the one that matches
+def getLogLeveMatch(logLevelList):
+    for level in logLevelList:
+        if level in LOGLEVEL:
+            return level
 
-def isGE(compare, actual):
-    return actual >= compare
-
-def isLE(compare, actual):
-    return actual <= compare
-
-def isThere(compare, actual):
-    return actual
-
+#####################################################################################################
+########################################## key lookups ##############################################
+#####################################################################################################
 
 # from https://stackoverflow.com/questions/43491287/elegant-way-to-check-if-a-nested-key-exists-in-a-dict
 def haskey(config, path):
@@ -61,10 +68,44 @@ def getkey(config, path, *default):
         raise
 
 #####################################################################################################
-#####################################################################################################
 #####################################  Gateway config checks ########################################
 #####################################################################################################
-#####################################################################################################
+
+# this is a collection of more simple checks on the gateway config.
+def GatewaySimpleChecks(GWConfig):
+    # if 'health_check.enable_health_checks' is True redis load will increase
+    if haskey(GWConfig, 'health_check.enable_health_checks'):
+        if getkey(GWConfig, 'health_check.enable_health_checks', False):
+            logWarn(GWConfig, 'health_check.enable_health_checks is set. Performance will suffer, redis will have added load.')
+            if haskey(GWConfig, 'health_check.health_check_value_timeouts'):
+                health_check_value_timeouts = getkey(GWConfig, 'health_check.health_check_value_timeouts', 0)
+                if health_check_value_timeouts > 0:
+                    # if 'health_check.health_check_value_timeouts' is > 0 most versions of the gateway panic (TT-3349)
+                    logWarn(GWConfig, f"health_check.health_check_value_timeouts({health_check_value_timeouts}) is greater than 0 which will panic many versions of the gateway")
+    # When 'hash_key_function' is changed during the life of an install keys will be inaccessible unless hash_key_function_fallback is set
+    if haskey(GWConfig, 'hash_key_function'):
+        hash_key_function = getkey(GWConfig, 'hash_key_function', "")
+        if hash_key_function != "":
+            logInfo(GWConfig, f"hash_key_function is {hash_key_function!r}. When hash_key_function is changed during the life of an install keys will be inaccessible unless 'hash_key_function_fallback' is set")
+    # 'health_check_endpoint_name' renames /hello
+    if haskey(GWConfig, 'health_check_endpoint_name'):
+        health_check_endpoint_name = getkey(GWConfig, 'health_check_endpoint_name', "")
+        if health_check_endpoint_name != '/helo' and health_check_endpoint_name != "":
+            logInfo(GWConfig, f'health_check_endpoint_name has been renamed to {health_check_endpoint_name!r}')
+    # if 'uptime_tests.disable' is missing or false uptime checks will be enabled
+    if not getkey(GWConfig, 'uptime_tests.disable', False):
+        logInfo(GWConfig, 'API endpoint health checks are enabled')
+        if haskey(GWConfig, 'uptime_tests.config.time_wait'):
+            uptime_test_config_time_wait=getkey(GWConfig, 'uptime_tests.config.time_wait', 0)
+            if uptime_test_config_time_wait > 25:
+                # if 'uptime_tests.config.time_wait' is more than about 25 seconds, uptime tests will never trigger an outage. 2.9.6~rcxxx is the only fixed version
+                # but it looks like 3.0.9 and 4.0.1 will fix this (TT-2479)
+                logWarn(GWConfig, f'uptime_tests.config.time_wait({uptime_test_config_time_wait}) is greater than 25 seconds. Uptime tests may never detect a down endpoint.')
+    # if enable_analytics and analytics_config.enable_detailed_recording are true
+    # then detailed analytics will be sent to redis which can be a big performance hit
+    if getkey(GWConfig, 'enable_analytics', False):
+        if getkey(GWConfig, 'analytics_config.enable_detailed_recording', False):
+            logWarn(GWConfig, "analytics_config.enable_detailed_recording is active. Performace will suffer, redis will have added load.")
 
 # To use '“disable_dashboard_zeroconf”: false' you need to make sure that policy.policy_connection_string and db_app_conf_options.connection_string are not defined.
 # If policy.policy_connection_string and db_app_conf_options.connection_string are defined, they need to be right no matter what disable_dashboard_zeroconf is set to
@@ -105,186 +146,34 @@ def checkGWConnectionString(GWconfig):
     if policy_connection_string != "" and app_connection_string != "" and app_connection_string != policy_connection_string:
         logFatal(GWconfig, "db_app_conf_options.connection_string and policies.policy_connection_string are different. They must be the same")
 
-# if enable_analytics and analytics_config.enable_detailed_recording
-# then detailed analytics will be sent to redis which can be a big performance hit
-def checkGWAnalytics(GWConfig):
-    if getkey(GWConfig, 'enable_analytics', False):
-        if getkey(GWConfig, 'analytics_config.enable_detailed_recording', False):
-            logWarn(GWConfig, "analytics_config.enable_detailed_recording is active. Performace will suffer, redis will have added load.")
+#####################################################################################################
+####################################### Pump config checks ##########################################
+#####################################################################################################
+
+def PumpSimpleChecks(PumpConfig):
+    # if 'dont_purge_uptime_data' is true uptime logs will not be available
+    if getkey(PumpConfig, 'dont_purge_uptime_data', False):
+        logWarn(PumpConfig, 'dont_purge_uptime_data is set, uptime logs will not be available')
 
 #####################################################################################################
+#################################### Dashboard config checks ########################################
 #####################################################################################################
-######################################### Log Functions #############################################
-#####################################################################################################
-#####################################################################################################
-def logFatal(ConfigJson, message):
-    configFileName = ConfigJson['__CONFIG-FILE']
-    if shouldPrint(["Fatal"]):
-        print(f"[Fatal]{configFileName}: {message}")
 
-def logWarn(ConfigJson, message):
-    configFileName = ConfigJson['__CONFIG-FILE']
-    if shouldPrint(["Warn"]):
-        print(f"[Warn]{configFileName}: {message}")
-
-def logInfo(ConfigJson, message):
-    configFileName = ConfigJson['__CONFIG-FILE']
-    if shouldPrint(["Info"]):
-        print(f"[Info]{configFileName}: {message}")
-
-# A sample test
-#    'health_check.health_check_value_timeouts': {          # this is the config path to check
-#        'checkFn': isGT,                                   # the function that will return true to trigger the message being printed
-#        'compare': 0,                                      # the vaule to compare. Here we compare 'config value is greater than 0'
-#        'reportValue': True,                               # the makes the diagnostic output include the value from the config file
-#                                                           # "message" is printed when checkFN returns true when the key values is compared with compare
-#        'message': 'is greater than 0. This will panic many versions of the gateway if the API healthcheck endpoint is called'
-#        'logLevel: ["Warn"]                                # list of log levels to print at. Defaults to Warn
-#    },
-
-# Define all the simple checks to perform on the gateway config file
-GatewayConfigChecks = {
-    # if 'health_check.enable_health_checks' is True we will load redis
-    'health_check.enable_health_checks': {
-        'checkFn': isTrue,
-        'compare': True,
-        'message': 'is set. Performance will suffer, redis will have added load.',
-        'logLevel': ["Perf", "Warn"]
-    },
-    # if 'health_check.health_check_value_timeouts' is > 0 most versions of the gateway panic (TT-3349)
-    # TODO: Not good enough because the health checks need to be enabled too
-    'health_check.health_check_value_timeouts': {
-        'checkFn': isGT,
-        'compare': 0,
-        'reportValue': True,
-        'message': 'is greater than 0. This will panic many versions of the gateway if the API healthcheck endpoint is called.',
-        'logLevel': ["Warn"]
-    },
-    # When 'hash_key_function' is changed during the life of an install keys will be inaccessible unless hash_key_function_fallback is set
-    'hash_key_function': {
-        'checkFn': isThere,
-        'compare': '',
-        'reportValue': True,
-        'message': 'is defined. Check for hash_key_function_fallback and the possibility of lost keys if it has been changed.',
-        'logLevel': ["Info"]
-    },
-    # 'health_check_endpoint_name' renames /hello
-    'health_check_endpoint_name':{
-        'checkFn': isNE,
-        'compare': '/hello',
-        'reportValue': True,
-        'message': 'is defined. /hello has been renamed.',
-        'logLevel': ["Info"]
-    },
-    # if 'uptime_tests.disable' is set to false uptime checks will be enabled
-    'uptime_tests.disable': {
-        'checkFn': isFalse,
-        'compare': False,
-        'message': 'is False. Look for uptime checks in APIs.',
-        'logLevel': ["Info"]
-    },
-    # if 'uptime_tests.config.time_wait' is more than about 25 seconds, uptime tests will never trigger an outage. 2.9.6~rcxxx is the only fixed version
-    # but it looks like 3.0.9 and 4.0.1 will fix this (TT-2479)
-    'uptime_tests.config.time_wait': {
-        'checkFn': isGT,
-        'compare': 25,
-        'reportValue': True,
-        'message': 'is greater than ~25 seconds. Uptime tests may never trigger.',
-        'logLevel': ["Warn"]
-    },
-}
-
-# Define all the simple checks to perform on the pump config file
-PumpConfigChecks = {
-    # 'dont_purge_uptime_data' must be True for uptime data to pump
-    'dont_purge_uptime_data': {
-        'checkFn': isTrue,
-        'compare': True,
-        'message': 'is set. Uptime checks will never be moved to redis.',
-        'logLevel': ["Warn"]
-    }
-}
-
-# Define all the simple checks to perform on the pump config file
-DashboardConfigChecks = {
+def DashboardSimpleChecks(DashbaordConfig):
     # 'force_api_defaults' will stop tyk-sync from being able to match up APIs and policies when you push them to the dashboard
-    'force_api_defaults': {
-        'checkFn': isTrue,
-        'compare': True,
-        'message': 'is set. tyk-sync will not be able to match up synced policies with APIs.',
-        'logLevel': ["Fatal"]
-    }
-}
-
-# check if the 'compare' matches the value in the config (by calling the checkFn) and return the 'message' if it matches
-# Populates checkObj['Value'] if 'reportValue' is true
-def checkVal(config, checkObj, checkPath):
-        checkFn = checkObj['checkFn']
-        configVal = getkey(config, checkPath, False)
-        if haskey(checkObj, 'compare'):
-            # simple compare against given value
-            if configVal is not None:
-                # check that value against compare.
-                if haskey(checkObj, 'reportValue') and getkey(checkObj, 'reportValue', False):
-                    checkObj['Value'] = configVal
-                if checkFn(checkObj['compare'], configVal):
-                    return checkObj['message']
-            else:
-                # harder to handle missing values. Just deal with the fact that missing booleans are 'False'
-                if isinstance(checkObj['compare'], bool):
-                    if haskey(checkObj, 'reportValue') and getkey(checkObj, 'reportValue', False):
-                        checkObj['Value'] = False
-                    # Missing implies False so use that
-                    if checkFn(checkObj['compare'], False):
-                        return checkObj['message']
-        else:
-            # call a the checkFn with the full config
-            return checkFn(config, checkObj)
-
-# are we configured to print the log level of this check?
-def shouldPrint(logLevelList):
-    if DEBUG:
-        print(f"[DEBUG][shouldPrint]Checking if {logLevelList!r} is in {LOGLEVEL!r}")
-    for level in logLevelList:
-        if level in LOGLEVEL:
-            return True
-
-# a check can have multiple log levels. Report the one that matches
-def getLogLeveMatch(logLevelList):
-    for level in logLevelList:
-        if level in LOGLEVEL:
-            return level
-
-def printResult(check, configFileName, checkName, result):
-    if 'logLevel' in check:
-        logLevelList = check['logLevel']
-    else:
-        # default to Info if not specified in the check
-        logLevelList = ['Info']
-    if shouldPrint(logLevelList):
-        if 'reportValue' in check and check['reportValue']:
-            print(f"[{getLogLeveMatch(logLevelList)}]{configFileName}: {checkName!r} ({check['Value']!r}) {result}")
-        else:
-            print(f"[{getLogLeveMatch(logLevelList)}]{configFileName}: {checkName!r} {result}")
-
-# check the json of the config file against the given checks
-def SingleConfigFileChecks(jsonConfig, ConfigChecks):
-    configFileName = jsonConfig['__CONFIG-FILE']
-    for checkName in ConfigChecks:
-        if DEBUG:
-            print(f"[DEBUG][SingleConfigFileChecks]checking {configFileName!r} for {checkName!r}")
-        check = ConfigChecks[checkName]
-        result = checkVal(jsonConfig, check, checkName)
-        if DEBUG:
-            print(f"[DEBUG][SingleConfigFileChecks]result from checkVal({checkName!r}) is {result!r}")
-        if result is not None and result:
-            printResult(check, configFileName, checkName, result)
-    return
+    if getkey(DashbaordConfig, 'force_api_defaults', False):
+        logFatal(DashbaordConfig, "force_api_defaults is set. tyk-sync will not be able to match up synced policies with APIs.")
 
 # Call all the gateway check functions
-def ComplexGatewayChecks(GWConfig):
+def GatewayConfigChecks(GWConfig):
     checkGWConnectionString(GWConfig)
-    checkGWAnalytics(GWConfig)
+    GatewaySimpleChecks(GWConfig)
+
+def PumpConfigChecks(PumpConfig):
+    PumpSimpleChecks(PumpConfig)
+
+def DashbaordConfigChecks(DashboardConfig):
+    DashboardSimpleChecks(DashboardConfig)
 
 def main():
     global LOGLEVEL
@@ -294,7 +183,7 @@ def main():
     parser.add_argument('-d', '--dashboardConfig', type=str, help='Dashboard config file "tyk_analytics.conf"')
     parser.add_argument('-t', '--TIBConfig', type=str, help='TIB config file "tib.conf"')
     parser.add_argument('-p', '--pumpConfig', type=str, help='Pump config file "pump.conf"')
-    parser.add_argument('-l', '--logLevel', type=str, help='Level of checks to report. One of: "Fatal", "Warn", "Info", "Perf". Default is "warn"')
+    parser.add_argument('-l', '--logLevel', type=str, help='Level of checks to report. One of: "Fatal", "Warn", "Info". Default is "Warn"')
     parser.add_argument('-D', '--DEBUG', dest='DEBUG', action='store_true', help="Enable debug output")
 
     args = parser.parse_args()
@@ -308,8 +197,8 @@ def main():
             LOGLEVEL = ["Warn", "Fatal"]
         elif args.logLevel in ['i', 'info', 'Info']:
             LOGLEVEL = ["Info", "Warn", "Fatal"]
-        elif args.logLevel in ['p', 'perf', 'Perf']:
-            LOGLEVEL = ["Perf"]
+        #elif args.logLevel in ['p', 'perf', 'Perf']:
+        #    LOGLEVEL = ["Perf"]
         else:
             print("[FATAL]Unknown log level")
             sys.exit(1)
@@ -322,20 +211,19 @@ def main():
         with open(args.gatewayConfig) as gatewayJsonFile:
             G=json.load(gatewayJsonFile)
             G['__CONFIG-FILE'] = args.gatewayConfig
-            SingleConfigFileChecks(G, GatewayConfigChecks)
-            ComplexGatewayChecks(G)
+            GatewayConfigChecks(G)
             gatewayConfigPresent = True
     if args.pumpConfig:
         with open(args.pumpConfig) as pumpJsonFile:
             P=json.load(pumpJsonFile)
             P['__CONFIG-FILE'] = args.pumpConfig
-            SingleConfigFileChecks(P, PumpConfigChecks)
+            PumpConfigChecks(P)
             pumpConfigPresent = True
     if args.dashboardConfig:
         with open(args.dashboardConfig) as dashboardJsonFile:
             D=json.load(dashboardJsonFile)
             D['__CONFIG-FILE'] = args.dashboardConfig
-            SingleConfigFileChecks(D, DashboardConfigChecks)
+            DashbaordConfigChecks(D)
             dashboardConfigPresent = True
     # need to call the checks with multiple config files here
 
