@@ -60,6 +60,12 @@ def getkey(config, path, *default):
             return default[0]
         raise
 
+#####################################################################################################
+#####################################################################################################
+#####################################  Gateway config checks ########################################
+#####################################################################################################
+#####################################################################################################
+
 # To use '“disable_dashboard_zeroconf”: false' you need to make sure that policy.policy_connection_string and db_app_conf_options.connection_string are not defined.
 # If policy.policy_connection_string and db_app_conf_options.connection_string are defined, they need to be right no matter what disable_dashboard_zeroconf is set to
 def checkGWConnectionString(GWconfig):
@@ -74,42 +80,57 @@ def checkGWConnectionString(GWconfig):
             # zero conf is disabled
             if app_connection_string == "":
                 # dashboard connection string is missing
-                logFatal("'Gateway': db_app_conf_options.connection_string is empty or missing and zeroconf is turned off. Gateway won't start.")
+                logFatal(GWconfig, "db_app_conf_options.connection_string is empty or missing and zeroconf is turned off. Gateway won't start.")
         else:
             # zeroconf is enabled
             if app_connection_string == "":
-                logFatal("'Gateway': db_app_conf_options.connection_string is empty and zeroconf is enabled. Gateway won't start.")
+                logFatal(GWconfig, "db_app_conf_options.connection_string is empty and zeroconf is enabled. Gateway won't start.")
             else:
-                logInfo("'Gateway': db_app_conf_options.connection_string is populated and zeroconf is enabled. Not much use having zeroconf on")
+                logInfo(GWconfig, "db_app_conf_options.connection_string is populated and zeroconf is enabled. Not much use having zeroconf on")
     else:
         # we're not looking to the dashboard for APIs
-        logInfo("'Gateway': use_db_app_configs is false. Gateway is running in CE or RPC mode")
+        logInfo(GWconfig, "use_db_app_configs is false. Gateway is running in CE or RPC mode")
     # deal with policy settings
     if getkey(GWconfig, 'policies.policy_source', "") == 'service':
         if getkey(GWconfig, 'disable_dashboard_zeroconf', False):
             # disable_dashboard_zeroconf is true so policies.policy_connection_string must be set
             if policy_connection_string == "":
-                logFatal("'Gateway': db_app_conf_options.connection_string is empty or missing and zeroconf is turned off. Gateway won't start.")
+                logFatal(GWconfig, "db_app_conf_options.connection_string is empty or missing and zeroconf is turned off. Gateway won't start.")
         else:
             # using disable_dashboard_zeroconf=false. policies.policy_connection_string must be set or totally missing
             if haskey(GWconfig, "policies.policy_connection_string"):
                 if policy_connection_string == "":
-                    logFatal("'Gateway': policies.policy_connection_string is empty and zeroconf is enabled. Gateway won't start.")
+                    logFatal(GWconfig, "policies.policy_connection_string is empty and zeroconf is enabled. Gateway won't start.")
     # if policy_connection_string and db_app_conf_options.connection_string are not empty, check that they are the same
     if policy_connection_string != "" and app_connection_string != "" and app_connection_string != policy_connection_string:
-        logFatal("'Gateway': db_app_conf_options.connection_string and policies.policy_connection_string are different. They must be the same")
+        logFatal(GWconfig, "db_app_conf_options.connection_string and policies.policy_connection_string are different. They must be the same")
 
-def logFatal(message):
+# if enable_analytics and analytics_config.enable_detailed_recording
+# then detailed analytics will be sent to redis which can be a big performance hit
+def checkGWAnalytics(GWConfig):
+    if getkey(GWConfig, 'enable_analytics', False):
+        if getkey(GWConfig, 'analytics_config.enable_detailed_recording', False):
+            logWarn(GWConfig, "analytics_config.enable_detailed_recording is active. Performace will suffer, redis will have added load.")
+
+#####################################################################################################
+#####################################################################################################
+######################################### Log Functions #############################################
+#####################################################################################################
+#####################################################################################################
+def logFatal(ConfigJson, message):
+    configFileName = ConfigJson['__CONFIG-FILE']
     if shouldPrint(["Fatal"]):
-        print(f"[Fatal]{message}")
+        print(f"[Fatal]{configFileName}: {message}")
 
-def logWarn(message):
+def logWarn(ConfigJson, message):
+    configFileName = ConfigJson['__CONFIG-FILE']
     if shouldPrint(["Warn"]):
-        print(f"[Warn]{message}")
+        print(f"[Warn]{configFileName}: {message}")
 
-def logInfo(message):
+def logInfo(ConfigJson, message):
+    configFileName = ConfigJson['__CONFIG-FILE']
     if shouldPrint(["Info"]):
-        print(f"[Info]{message}")
+        print(f"[Info]{configFileName}: {message}")
 
 # A sample test
 #    'health_check.health_check_value_timeouts': {          # this is the config path to check
@@ -120,7 +141,6 @@ def logInfo(message):
 #        'message': 'is greater than 0. This will panic many versions of the gateway if the API healthcheck endpoint is called'
 #        'logLevel: ["Warn"]                                # list of log levels to print at. Defaults to Warn
 #    },
-
 
 # Define all the simple checks to perform on the gateway config file
 GatewayConfigChecks = {
@@ -155,14 +175,6 @@ GatewayConfigChecks = {
         'reportValue': True,
         'message': 'is defined. /hello has been renamed.',
         'logLevel': ["Info"]
-    },
-    # 'analytics_config.enable_detailed_recording' will load redis if set to True
-    # Todo: enable_analytics must be true too
-    'analytics_config.enable_detailed_recording': {
-        'checkFn': isTrue,
-        'compare': True,
-        'message': 'is set. Performace will suffer, redis will have added load.',
-        'logLevel': ["Perf", "Warn"]
     },
     # if 'uptime_tests.disable' is set to false uptime checks will be enabled
     'uptime_tests.disable': {
@@ -204,52 +216,23 @@ DashboardConfigChecks = {
     }
 }
 
-# return true if the key exists in the config
-def keyExists(config, checkPath):
-    if '.' not in checkPath:
-        return checkPath in config
-    else:
-        # need to break off the first part of the key, up to the first '.' and recurse with the rest
-        splitPath=checkPath.split('.')
-        firstPath=splitPath[0]
-        restofPath='.'.join(splitPath[1:])
-        if firstPath in config:
-            return keyExists(config[firstPath], restofPath)
-        else:
-            return False
-
-# get a value from the given config, returns 'None' if not found in the config
-def getVal(config, checkPath):
-    if '.' not in checkPath:
-        if checkPath in config:
-            if DEBUG:
-                print(f"[DEBUG][getVal({checkPath!r})]returning {config[checkPath]!r}")
-            return config[checkPath]
-    else:
-        # need to break off the first part of the key, up to the first '.' and recurse with the rest
-        splitPath=checkPath.split('.')
-        firstPath=splitPath[0]
-        restofPath='.'.join(splitPath[1:])
-        if firstPath in config:
-            return getVal(config[firstPath], restofPath)
-
 # check if the 'compare' matches the value in the config (by calling the checkFn) and return the 'message' if it matches
 # Populates checkObj['Value'] if 'reportValue' is true
 def checkVal(config, checkObj, checkPath):
         checkFn = checkObj['checkFn']
-        configVal = getVal(config, checkPath)
-        if 'compare' in checkObj:
+        configVal = getkey(config, checkPath, False)
+        if haskey(checkObj, 'compare'):
             # simple compare against given value
             if configVal is not None:
                 # check that value against compare.
-                if 'reportValue' in checkObj and checkObj['reportValue']:
+                if haskey(checkObj, 'reportValue') and getkey(checkObj, 'reportValue', False):
                     checkObj['Value'] = configVal
                 if checkFn(checkObj['compare'], configVal):
                     return checkObj['message']
             else:
                 # harder to handle missing values. Just deal with the fact that missing booleans are 'False'
                 if isinstance(checkObj['compare'], bool):
-                    if 'reportValue' in checkObj and checkObj['reportValue']:
+                    if haskey(checkObj, 'reportValue') and getkey(checkObj, 'reportValue', False):
                         checkObj['Value'] = False
                     # Missing implies False so use that
                     if checkFn(checkObj['compare'], False):
@@ -272,7 +255,7 @@ def getLogLeveMatch(logLevelList):
         if level in LOGLEVEL:
             return level
 
-def printResult(check, componentName, checkName, result):
+def printResult(check, configFileName, checkName, result):
     if 'logLevel' in check:
         logLevelList = check['logLevel']
     else:
@@ -280,26 +263,28 @@ def printResult(check, componentName, checkName, result):
         logLevelList = ['Info']
     if shouldPrint(logLevelList):
         if 'reportValue' in check and check['reportValue']:
-            print(f"[{getLogLeveMatch(logLevelList)}]{componentName!r}: {checkName!r} ({check['Value']!r}) {result}")
+            print(f"[{getLogLeveMatch(logLevelList)}]{configFileName}: {checkName!r} ({check['Value']!r}) {result}")
         else:
-            print(f"[{getLogLeveMatch(logLevelList)}]{componentName!r}: {checkName!r} {result}")
+            print(f"[{getLogLeveMatch(logLevelList)}]{configFileName}: {checkName!r} {result}")
 
 # check the json of the config file against the given checks
-def SingleConfigFileChecks(componentName, jsonConfig, ConfigChecks):
+def SingleConfigFileChecks(jsonConfig, ConfigChecks):
+    configFileName = jsonConfig['__CONFIG-FILE']
     for checkName in ConfigChecks:
         if DEBUG:
-            print(f"[DEBUG][SingleConfigFileChecks]checking {componentName!r} for {checkName!r}")
+            print(f"[DEBUG][SingleConfigFileChecks]checking {configFileName!r} for {checkName!r}")
         check = ConfigChecks[checkName]
         result = checkVal(jsonConfig, check, checkName)
         if DEBUG:
             print(f"[DEBUG][SingleConfigFileChecks]result from checkVal({checkName!r}) is {result!r}")
         if result is not None and result:
-            printResult(check, componentName, checkName, result)
+            printResult(check, configFileName, checkName, result)
     return
 
+# Call all the gateway check functions
 def ComplexGatewayChecks(GWConfig):
     checkGWConnectionString(GWConfig)
-
+    checkGWAnalytics(GWConfig)
 
 def main():
     global LOGLEVEL
@@ -336,18 +321,21 @@ def main():
     if args.gatewayConfig:
         with open(args.gatewayConfig) as gatewayJsonFile:
             G=json.load(gatewayJsonFile)
-            SingleConfigFileChecks('Gateway', G, GatewayConfigChecks)
+            G['__CONFIG-FILE'] = args.gatewayConfig
+            SingleConfigFileChecks(G, GatewayConfigChecks)
             ComplexGatewayChecks(G)
             gatewayConfigPresent = True
     if args.pumpConfig:
         with open(args.pumpConfig) as pumpJsonFile:
             P=json.load(pumpJsonFile)
-            SingleConfigFileChecks('Pump', P, PumpConfigChecks)
+            P['__CONFIG-FILE'] = args.pumpConfig
+            SingleConfigFileChecks(P, PumpConfigChecks)
             pumpConfigPresent = True
     if args.dashboardConfig:
         with open(args.dashboardConfig) as dashboardJsonFile:
             D=json.load(dashboardJsonFile)
-            SingleConfigFileChecks('Dashboard', D, DashboardConfigChecks)
+            D['__CONFIG-FILE'] = args.dashboardConfig
+            SingleConfigFileChecks(D, DashboardConfigChecks)
             dashboardConfigPresent = True
     # need to call the checks with multiple config files here
 
