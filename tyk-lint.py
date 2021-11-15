@@ -159,25 +159,54 @@ def PumpSimpleChecks(PumpConfig):
 #################################### Dashboard config checks ########################################
 #####################################################################################################
 
-def DashboardSimpleChecks(DashbaordConfig):
+def DashboardSimpleChecks(DashboardConfig):
     # 'force_api_defaults' will stop tyk-sync from being able to match up APIs and policies when you push them to the dashboard
-    if getkey(DashbaordConfig, 'force_api_defaults', False):
-        logFatal(DashbaordConfig, "force_api_defaults is set. tyk-sync will not be able to match up synced policies with APIs.")
+    if getkey(DashboardConfig, 'force_api_defaults', False):
+        logFatal(DashboardConfig, "force_api_defaults is set. tyk-sync will not be able to match up synced policies with APIs.")
+
+#####################################################################################################
+##################################### Multiple config checks ########################################
+#####################################################################################################
+
+def SecretsCheck(GWConfig, DashboardConfig, PumpConfig):
+    # tyk_analytics.conf: tyk_api_config.Secret -> tyk.conf: secret
+    if haskey(GWConfig, 'secret') and haskey(DashboardConfig, 'tyk_api_config.Secret'):
+        GWsecret = getkey(GWConfig, 'secret')
+        DashboardSecret = getkey(DashboardConfig, 'tyk_api_config.Secret')
+        if GWsecret != DashboardSecret:
+            DashboardConfigFile = DashboardConfig['__CONFIG-FILE']
+            logFatal(GWConfig, f"Gateway 'secret: {GWsecret}' doesn't match dashboard {DashboardConfigFile}: 'tyk_api_config.Secret: {DashboardSecret}'")
+    # tyk_analytics.conf: shared_node_secret -> tyk.conf: node_secret -> tib.conf: TykAPISettings.GatewayConfig.AdminSecret
+    # TODO: parse the TIB config file
+    if haskey(GWConfig, 'node_secret') and haskey(DashboardConfig, 'shared_node_secret'):
+        GWNodeSecret = getkey(GWConfig, 'node_secret')
+        DashboardNodeSecret = getkey(DashboardConfig, 'shared_node_secret')
+        if GWNodeSecret != DashboardNodeSecret:
+            DashboardConfigFile = DashboardConfig['__CONFIG-FILE']
+            logFatal(GWConfig, f"Gateway 'node_secret: {GWNodeSecret}' doesn't match dashboard {DashboardConfigFile}: 'shared_node_secret: {DashboardNodeSecret}'")
 
 # Call all the gateway check functions
 def GatewayConfigChecks(GWConfig):
     checkGWConnectionString(GWConfig)
     GatewaySimpleChecks(GWConfig)
 
+def DashboardConfigChecks(DashboardConfig):
+    DashboardSimpleChecks(DashboardConfig)
+
 def PumpConfigChecks(PumpConfig):
     PumpSimpleChecks(PumpConfig)
 
-def DashbaordConfigChecks(DashboardConfig):
-    DashboardSimpleChecks(DashboardConfig)
+def MultifileChecks(GWConfig, DashboardConfig, PumpConfig):
+    SecretsCheck(GWConfig, DashboardConfig, PumpConfig)
+    #MongoConnectionStringChecks(GWConfig, DashboardConfig, PumpConfig)
+    #RedisConnectionStringChecks(GWConfig, DashboardConfig, PumpConfig)
 
 def main():
     global LOGLEVEL
     global DEBUG
+    G = {}
+    D = {}
+    P = {}
     parser = argparse.ArgumentParser(description='Check tyk config files for errors and gotchas')
     parser.add_argument('-g', '--gatewayConfig', type=str, help='Gateway config file "tyk.conf"')
     parser.add_argument('-d', '--dashboardConfig', type=str, help='Dashboard config file "tyk_analytics.conf"')
@@ -212,20 +241,19 @@ def main():
             G=json.load(gatewayJsonFile)
             G['__CONFIG-FILE'] = args.gatewayConfig
             GatewayConfigChecks(G)
-            gatewayConfigPresent = True
+    if args.dashboardConfig:
+        with open(args.dashboardConfig) as dashboardJsonFile:
+            D=json.load(dashboardJsonFile)
+            D['__CONFIG-FILE'] = args.dashboardConfig
+            DashboardConfigChecks(D)
     if args.pumpConfig:
         with open(args.pumpConfig) as pumpJsonFile:
             P=json.load(pumpJsonFile)
             P['__CONFIG-FILE'] = args.pumpConfig
             PumpConfigChecks(P)
-            pumpConfigPresent = True
-    if args.dashboardConfig:
-        with open(args.dashboardConfig) as dashboardJsonFile:
-            D=json.load(dashboardJsonFile)
-            D['__CONFIG-FILE'] = args.dashboardConfig
-            DashbaordConfigChecks(D)
-            dashboardConfigPresent = True
+
     # need to call the checks with multiple config files here
+    MultifileChecks(G, D, P)
 
 if __name__ == "__main__":
     main()
