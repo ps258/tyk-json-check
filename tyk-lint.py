@@ -90,7 +90,7 @@ def GatewaySimpleChecks(GWConfig):
     # 'health_check_endpoint_name' renames /hello
     if haskey(GWConfig, 'health_check_endpoint_name'):
         health_check_endpoint_name = getkey(GWConfig, 'health_check_endpoint_name', "")
-        if health_check_endpoint_name != '/helo' and health_check_endpoint_name != "":
+        if health_check_endpoint_name != '/hello' and health_check_endpoint_name != "":
             logInfo(GWConfig, f'health_check_endpoint_name has been renamed to {health_check_endpoint_name!r}')
     # if 'uptime_tests.disable' is missing or false uptime checks will be enabled
     if not getkey(GWConfig, 'uptime_tests.disable', False):
@@ -154,6 +154,16 @@ def PumpSimpleChecks(PumpConfig):
     # if 'dont_purge_uptime_data' is true uptime logs will not be available
     if getkey(PumpConfig, 'dont_purge_uptime_data', False):
         logWarn(PumpConfig, 'dont_purge_uptime_data is set, uptime logs will not be available')
+    # 'health_check_endpoint_name' renames /hello
+    if haskey(PumpConfig, 'health_check_endpoint_name'):
+        health_check_endpoint_name = getkey(PumpConfig, 'health_check_endpoint_name', "")
+        if health_check_endpoint_name != '/hello' and health_check_endpoint_name != "":
+            logInfo(PumpConfig, f'health_check_endpoint_name has been renamed to {health_check_endpoint_name!r}')
+    # 'health_check_endpoint_port' defaults to 8083
+    if haskey(PumpConfig, 'health_check_endpoint_port'):
+        health_check_endpoint_port = getkey(PumpConfig, 'health_check_endpoint_port', "")
+        if health_check_endpoint_port != 8083 and health_check_endpoint_port != "":
+            logInfo(PumpConfig, f'health_check_endpoint_port has been changed to {health_check_endpoint_port!r}')
 
 #####################################################################################################
 #################################### Dashboard config checks ########################################
