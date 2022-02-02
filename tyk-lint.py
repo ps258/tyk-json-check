@@ -161,8 +161,8 @@ def PumpSimpleChecks(PumpConfig):
             logInfo(PumpConfig, f'health_check_endpoint_name has been renamed to {health_check_endpoint_name!r}')
     # 'health_check_endpoint_port' defaults to 8083
     if haskey(PumpConfig, 'health_check_endpoint_port'):
-        health_check_endpoint_port = getkey(PumpConfig, 'health_check_endpoint_port', "")
-        if health_check_endpoint_port != 8083 and health_check_endpoint_port != "":
+        health_check_endpoint_port = getkey(PumpConfig, 'health_check_endpoint_port', 8083)
+        if health_check_endpoint_port != 8083:
             logInfo(PumpConfig, f'health_check_endpoint_port has been changed to {health_check_endpoint_port!r}')
 
 #####################################################################################################
@@ -173,6 +173,16 @@ def DashboardSimpleChecks(DashboardConfig):
     # 'force_api_defaults' will stop tyk-sync from being able to match up APIs and policies when you push them to the dashboard
     if getkey(DashboardConfig, 'force_api_defaults', False):
         logFatal(DashboardConfig, "force_api_defaults is set. tyk-sync will not be able to match up synced policies with APIs.")
+    # 'health_check_endpoint_name' renames /hello
+    if haskey(DashboardConfig, 'health_check_endpoint_name'):
+        health_check_endpoint_name = getkey(DashboardConfig, 'health_check_endpoint_name', "")
+        if health_check_endpoint_name != '/hello' and health_check_endpoint_name != "":
+            logInfo(DashboardConfig, f'health_check_endpoint_name has been renamed to {health_check_endpoint_name!r}')
+    # 'listen_port' changes default port from 300
+    if haskey(DashboardConfig, 'listen_port'):
+        listen_port = getkey(DashboardConfig, 'listen_port', 3000)
+        if listen_port != 3000:
+            logWarn(DashboardConfig, f'listen_port has been changed to {listen_port!r}')
 
 #####################################################################################################
 ##################################### Multiple config checks ########################################
