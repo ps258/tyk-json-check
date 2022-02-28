@@ -94,7 +94,7 @@ def GatewaySimpleChecks(GWConfig):
             logInfo(GWConfig, f'health_check_endpoint_name has been renamed to {health_check_endpoint_name!r}')
     # if 'uptime_tests.disable' is missing or false uptime checks will be enabled
     if not getkey(GWConfig, 'uptime_tests.disable', False):
-        logInfo(GWConfig, 'API endpoint health checks are enabled')
+        logInfo(GWConfig, 'API endpoint health checks are enabled: uptime_tests.disable is false')
         if haskey(GWConfig, 'uptime_tests.config.time_wait'):
             uptime_test_config_time_wait=getkey(GWConfig, 'uptime_tests.config.time_wait', 0)
             if uptime_test_config_time_wait > 25:
@@ -106,6 +106,11 @@ def GatewaySimpleChecks(GWConfig):
     if getkey(GWConfig, 'enable_analytics', False):
         if getkey(GWConfig, 'analytics_config.enable_detailed_recording', False):
             logWarn(GWConfig, "analytics_config.enable_detailed_recording is active. Performace will suffer, redis will have added load.")
+    # if slave_options.bind_to_slugs is true then listen path will be ignored and slug will be used.
+    # The source says:
+    #      	// For an Self-Managed installation this can be left at `false` (the default setting). For Legacy Cloud Gateways it must be set to ‘true’.
+    if getkey(GWConfig, 'slave_options.bind_to_slugs', False):
+        logWarn(GWConfig, "slave_options.bind_to_slugs is true, This should only be the case for legacy cloud")
 
 # To use '“disable_dashboard_zeroconf”: false' you need to make sure that policy.policy_connection_string and db_app_conf_options.connection_string are not defined.
 # If policy.policy_connection_string and db_app_conf_options.connection_string are defined, they need to be right no matter what disable_dashboard_zeroconf is set to
@@ -233,7 +238,7 @@ def main():
     parser.add_argument('-t', '--TIBConfig', type=str, help='TIB config file "tib.conf"')
     parser.add_argument('-p', '--pumpConfig', type=str, help='Pump config file "pump.conf"')
     parser.add_argument('-l', '--logLevel', type=str, help='Level of checks to report. One of: "Fatal", "Warn", "Info". Default is "Warn"')
-    parser.add_argument('-D', '--DEBUG', dest='DEBUG', action='store_true', help="Enable debug output")
+    parser.add_argument('-D', '--DEBUG', dest='DEBUG', action='store_true', help="Enable debug output (for development)")
 
     args = parser.parse_args()
     if args.DEBUG:
