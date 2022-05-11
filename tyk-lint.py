@@ -183,11 +183,15 @@ def DashboardSimpleChecks(DashboardConfig):
         health_check_endpoint_name = getkey(DashboardConfig, 'health_check_endpoint_name', "")
         if health_check_endpoint_name != '/hello' and health_check_endpoint_name != "":
             logInfo(DashboardConfig, f'health_check_endpoint_name has been renamed to {health_check_endpoint_name!r}')
-    # 'listen_port' changes default port from 300
+    # 'listen_port' changes default port from 3000
     if haskey(DashboardConfig, 'listen_port'):
         listen_port = getkey(DashboardConfig, 'listen_port', 3000)
         if listen_port != 3000:
             logWarn(DashboardConfig, f'listen_port has been changed to {listen_port!r}')
+    # 'page_size' should default to 10 but doesn't. 
+    # When it's missing the dashboard will act as though there are no APIs, Keys, Policies, Nodes etc.
+    if not haskey(DashboardConfig, 'page_size'):
+        logFatal(DashboardConfig, 'page_size is not set. APIs, Keys, Policies, Nodes etc. will not be displayed')
 
 #####################################################################################################
 ##################################### Multiple config checks ########################################
